@@ -77,6 +77,7 @@
   <input type="file" id="file2" accept="image/*" hidden>
   <button class="pick2" id="pick1"><span class="plus">＋</span>第一张照片<small>拼在左边 · 点这里选，选错了再点一次可重选</small></button>
   <button class="pick2" id="pick2"><span class="plus">＋</span>第二张照片<small>拼在右边 · 点这里选，选错了再点一次可重选</small></button>
+  <button id="copySame" style="display:block;width:100%;margin-top:10px;padding:11px;border:1px solid #d8cbb4;border-radius:12px;background:#fff;color:#8a6d3b;font-size:14px;cursor:pointer">第二张用第一张 · 同一张照片印两份</button>
   <div class="card">
     <div class="row"><label>第一张照片日期</label><input type="date" id="duoDate1"></div>
     <div class="row"><label>第二张照片日期</label><input type="date" id="duoDate2"></div>
@@ -106,6 +107,10 @@
   <div class="row"><label>显示累计天数</label>
     <span class="switch"><input type="checkbox" id="showDays"><span class="track"></span></span>
   </div>
+  <div class="row"><label>里程碑小徽章</label>
+    <span class="switch"><input type="checkbox" id="milestone" checked><span class="track"></span></span>
+  </div>
+  <div class="note">照片正好是满月、百天、半岁、周岁、两周岁那天时，照片上方会自动多一个小徽章，不想加可以关掉。</div>
   <div class="divider" id="printDivider"></div>
   <div class="row" id="printRow"><label>打印尺寸</label><span class="val" id="printVal">原图</span></div>
   <div class="chips" id="printChips"></div>
@@ -115,6 +120,10 @@
     <div class="chips" id="fitChips"></div>
     <div class="note" style="margin-top:8px">裁剪填满：画面铺满整张相纸，边缘会裁掉一点；完整留白：照片一点不裁，多出的地方留白边。注意：照片比例和格子接近时（比如竖拍照片拼版、中间留白拉到0），两种填法本来就几乎一样，横拍或方形照片区别最明显。</div>
   </div>
+  <div class="divider"></div>
+  <div class="row"><label>四周留白（打印防切边）</label><span class="val" id="marginVal">0 mm</span></div>
+  <input type="range" id="marginRange" min="0" max="8" step="1" value="0">
+  <div class="note">普通打印机四边会吃掉几毫米，留一点白边，照片和水印会整体往里收，怎么打都不会被切到。只在选了打印尺寸或拼版时生效。</div>
 </div>
 
 <div class="btns" id="btns">
@@ -136,6 +145,33 @@ function toDateStr(d){const m=String(d.getMonth()+1).padStart(2,'0');const day=S
 function fmtDate(d){const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return d.getFullYear()+'.'+m+'.'+day;}
 function addMonths(date,n){const d=new Date(date.getFullYear(),date.getMonth(),1);d.setMonth(d.getMonth()+n);const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(date.getDate(),last));return d;}
 function calcAge(birth,photo){const b=new Date(birth.getFullYear(),birth.getMonth(),birth.getDate());const p=new Date(photo.getFullYear(),photo.getMonth(),photo.getDate());const totalDays=Math.round((p-b)/86400000);if(totalDays<0)return{valid:false,totalDays};let mt=(p.getFullYear()-b.getFullYear())*12+(p.getMonth()-b.getMonth());if(addMonths(b,mt)>p)mt-=1;const after=addMonths(b,mt);const days=Math.round((p-after)/86400000);return{valid:true,years:Math.floor(mt/12),months:mt%12,days,totalDays};}
+function milestoneFor(age){
+  if(!age||!age.valid) return '';
+  const mt=age.years*12+age.months;
+  if(mt===1&&age.days===0) return '满月啦';
+  if(age.totalDays===99||age.totalDays===100) return '百天快乐';
+  if(mt===6&&age.days===0) return '半岁啦';
+  if(mt===12&&age.days===0) return '一周岁啦';
+  if(mt===24&&age.days===0) return '两周岁啦';
+  return '';
+}
+function drawMilestone(ctx,W,H,text,scale){
+  if(!text) return;
+  const label='★ '+text+' ★';
+  const size=W*0.037*(scale||1);
+  setFont(ctx,size,'bold');
+  const tw=ctx.measureText(label).width;
+  const padX=size*0.9, padY=size*0.45;
+  const w=tw+padX*2, h=size+padY*2;
+  const x=(W-w)/2, y=H*0.035;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.25)';ctx.shadowBlur=W*0.008;ctx.shadowOffsetY=W*0.002;
+  ctx.fillStyle='rgba(179,129,60,0.94)';
+  roundRect(ctx,x,y,w,h,h/2);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle='#fff8ec';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(label,W/2,y+h/2+size*0.05);
+}
 function ageMainText(age){if(!age||!age.valid)return '';if(age.totalDays===0)return '出生第一天';const mt=age.years*12+age.months;if(mt===0)return age.days+'天';return mt+'个月'+age.days+'天';}
 
 // ---------- EXIF 拍摄时间 ----------
@@ -167,6 +203,7 @@ const COLORS=[['#ffffff','奶白'],['#f7e7c3','奶油'],['#d9a441','暖金'],['#
 const PRINT_SIZES=[['orig','原图',0,0,''],['4','4寸',900,1200,'76×102mm'],['5','5寸',1050,1500,'89×127mm'],['6','6寸',1200,1800,'102×152mm'],['7','7寸',1500,2100,'127×178mm'],['8','8寸',1800,2400,'152×203mm'],['10','10寸',2400,3000,'203×254mm']];
 const FIT_MODES=[['crop','裁剪填满'],['fit','完整留白']];
 let printSize='orig', fitMode='crop';
+let marginMm=0, milestoneOn=true;
 function printTarget(){
   const spec=PRINT_SIZES.find(x=>x[0]===printSize);
   if(!spec||printSize==='orig') return null;
@@ -222,7 +259,7 @@ function ageDataFor(pdStr){
   if(!pdStr) return {err:'还没选照片日期'};
   const age=calcAge(parseDateStr(birthStr),parseDateStr(pdStr));
   if(!age.valid) return {err:'照片日期比出生日期还早'};
-  return {age, mainText:ageMainText(age), dateText:fmtDate(parseDateStr(pdStr))};
+  return {age, mainText:ageMainText(age), dateText:fmtDate(parseDateStr(pdStr)), milestone:milestoneOn?milestoneFor(age):''};
 }
 function renderCell(ctx,im,d,W,H){
   ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
@@ -233,30 +270,32 @@ function renderCell(ctx,im,d,W,H){
     ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,W,H);
   }
   drawIntoFor(ctx,im,px,py,pw,ph);
-  if(d) drawFns[styleId](ctx,W,H,{...d,stripTop});
+  if(d){ drawFns[styleId](ctx,W,H,{...d,stripTop}); drawMilestone(ctx,W,H,d.milestone,d.scale); }
 }
 function redrawDuo(){
   const cv=$('cv'),ctx=cv.getContext('2d');
   cv.width=DUO_W;cv.height=DUO_H;
   ctx.fillStyle='#ffffff';ctx.fillRect(0,0,DUO_W,DUO_H);
-  const cellW=(DUO_W-duoGap)/2;
+  const mPx=Math.round(marginMm*300/25.4);
+  const innerW=DUO_W-2*mPx, innerH=DUO_H-2*mPx;
+  const cellW=(innerW-duoGap)/2, cellH=innerH;
   const datas=[ageDataFor($('duoDate1').value),ageDataFor($('duoDate2').value)];
   const lines=[];
   for(let i=0;i<2;i++){
     const im=duoImgs[i];
-    const x0=i===0?0:cellW+duoGap;
+    const x0=mPx+(i===0?0:cellW+duoGap), y0=mPx;
     ctx.save();
-    ctx.beginPath();ctx.rect(x0,0,cellW,CELL_H);ctx.clip();
-    ctx.translate(x0,0);
+    ctx.beginPath();ctx.rect(x0,y0,cellW,cellH);ctx.clip();
+    ctx.translate(x0,y0);
     if(im){
-      const d=datas[i].err?null:{mainText:datas[i].mainText,dateText:datas[i].dateText,totalDays:datas[i].age.totalDays,...settings()};
-      renderCell(ctx,im,d,cellW,CELL_H);
-      lines.push('第'+(i+1)+'张：'+(datas[i].err?datas[i].err:datas[i].mainText));
+      const d=datas[i].err?null:{mainText:datas[i].mainText,dateText:datas[i].dateText,totalDays:datas[i].age.totalDays,milestone:datas[i].milestone,...settings()};
+      renderCell(ctx,im,d,cellW,cellH);
+      lines.push('第'+(i+1)+'张：'+(datas[i].err?datas[i].err:datas[i].mainText+(datas[i].milestone?' · 🎉 '+datas[i].milestone:'')));
     }else{
-      ctx.fillStyle='#f8f3e8';ctx.fillRect(0,0,cellW,CELL_H);
+      ctx.fillStyle='#f8f3e8';ctx.fillRect(0,0,cellW,cellH);
       ctx.fillStyle='#a29885';ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.font='44px sans-serif';
-      ctx.fillText(i===0?'第一张照片':'第二张照片',cellW/2,CELL_H/2);
+      ctx.fillText(i===0?'第一张照片':'第二张照片',cellW/2,cellH/2);
       lines.push('第'+(i+1)+'张：还没选');
     }
     ctx.restore();
@@ -264,8 +303,8 @@ function redrawDuo(){
   if(!exportMode){
     ctx.save();
     ctx.strokeStyle='rgba(60,50,35,0.45)';ctx.lineWidth=3;ctx.setLineDash([20,14]);
-    ctx.beginPath();ctx.moveTo(cellW,0);ctx.lineTo(cellW,DUO_H);ctx.stroke();
-    if(duoGap>0){ctx.beginPath();ctx.moveTo(cellW+duoGap,0);ctx.lineTo(cellW+duoGap,DUO_H);ctx.stroke();}
+    ctx.beginPath();ctx.moveTo(mPx+cellW,mPx);ctx.lineTo(mPx+cellW,mPx+innerH);ctx.stroke();
+    if(duoGap>0){ctx.beginPath();ctx.moveTo(mPx+cellW+duoGap,mPx);ctx.lineTo(mPx+cellW+duoGap,mPx+innerH);ctx.stroke();}
     ctx.restore();
   }
   $('duoAgeLine').style.display='block';
@@ -297,13 +336,19 @@ if(saved.scale){$('scale').value=saved.scale;$('scaleVal').textContent=saved.sca
 if(saved.showDays===true)$('showDays').checked=true;
 if(saved.printSize&&PRINT_SIZES.some(x=>x[0]===saved.printSize)){printSize=saved.printSize;document.querySelectorAll('#printChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.pid===printSize));}
 if(saved.fitMode&&(saved.fitMode==='crop'||saved.fitMode==='fit')){fitMode=saved.fitMode;document.querySelectorAll('#fitChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.fid===fitMode));}
+if(typeof saved.marginMm==='number'&&saved.marginMm>=0&&saved.marginMm<=8){marginMm=saved.marginMm;}
+if(saved.milestone===false){milestoneOn=false;}
 const savedBirth=localStorage.getItem('babyBirth');
 if(savedBirth) $('birth').value=savedBirth;
-function persist(){localStorage.setItem('wmSettings',JSON.stringify({scale:+$('scale').value,showDays:$('showDays').checked,printSize:printSize,fitMode:fitMode}));}
+function persist(){localStorage.setItem('wmSettings',JSON.stringify({scale:+$('scale').value,showDays:$('showDays').checked,printSize:printSize,fitMode:fitMode,marginMm:marginMm,milestone:milestoneOn}));}
 $('birth').addEventListener('change',()=>{localStorage.setItem('babyBirth',$('birth').value);hideResult();redraw();});
 $('photoDate').addEventListener('change',()=>{$('dateNote').textContent='手动设置的照片日期';hideResult();redraw();});
 $('scale').addEventListener('input',()=>{$('scaleVal').textContent=$('scale').value+'%';persist();hideResult();redraw();});
 $('showDays').addEventListener('change',()=>{persist();hideResult();redraw();});
+$('marginRange').value=marginMm;$('marginVal').textContent=marginMm+' mm';
+$('marginRange').addEventListener('input',()=>{marginMm=+$('marginRange').value;$('marginVal').textContent=marginMm+' mm';persist();hideResult();redraw();});
+$('milestone').checked=milestoneOn;
+$('milestone').addEventListener('change',()=>{milestoneOn=$('milestone').checked;persist();hideResult();redraw();});
 $('pick').onclick=()=>$('file').click();
 $('again').onclick=()=>$('file').click();
 $('file').addEventListener('change',async e=>{
@@ -319,7 +364,7 @@ function currentAge(){
   if(!birthStr) return {err:'先选一下宝宝的出生日期 👆'};
   const age=calcAge(parseDateStr(birthStr),parseDateStr(pdStr));
   if(!age.valid) return {err:'照片日期比出生日期还早，检查一下两个日期'};
-  return {age, mainText:ageMainText(age), dateText:fmtDate(parseDateStr(pdStr))};
+  return {age, mainText:ageMainText(age), dateText:fmtDate(parseDateStr(pdStr)), milestone:milestoneOn?milestoneFor(age):''};
 }
 function settings(){return {scale:+$('scale').value/100, color:color, showDays:$('showDays').checked};}
 
@@ -329,8 +374,8 @@ function redraw(){
   const r=currentAge();
   $('ageLine').style.display='block';
   if(r.err){$('ageLine').textContent=r.err;drawOnly(null);return;}
-  $('ageLine').innerHTML='宝宝这天 <b>'+r.mainText+'</b> 啦 · 来到世界第 '+r.age.totalDays+' 天';
-  drawOnly({mainText:r.mainText,dateText:r.dateText,totalDays:r.age.totalDays,...settings()});
+  $('ageLine').innerHTML='宝宝这天 <b>'+r.mainText+'</b> 啦 · 来到世界第 '+r.age.totalDays+' 天'+(r.milestone?' · 🎉 '+r.milestone:'');
+  drawOnly({mainText:r.mainText,dateText:r.dateText,totalDays:r.age.totalDays,milestone:r.milestone,...settings()});
 }
 
 function drawOnly(d){
@@ -338,18 +383,28 @@ function drawOnly(d){
   const w=img.naturalWidth,h=img.naturalHeight;
   const target=d?printTarget():null;
   if(target){
-    // 打印尺寸模式：成品画布严格等于目标像素
-    let px=0,py=0,pw=target.w,ph=target.h,stripTop=0;
+    // 打印尺寸模式：成品画布严格等于目标像素；四周留白时内容整体内缩，画布尺寸不变
     cv.width=target.w;cv.height=target.h;
     ctx.fillStyle='#ffffff';ctx.fillRect(0,0,target.w,target.h);
+    const mPx=Math.round(marginMm*300/25.4);
+    const ix=mPx, iy=mPx, iw=target.w-2*mPx, ih=target.h-2*mPx;
     if(styleId==='polaroid'){
-      const side=Math.round(target.w*0.06);
-      const bottom=Math.round(target.h*0.22);
-      px=side;py=side;pw=target.w-side*2;ph=target.h-side-bottom;stripTop=py+ph;
-      ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,target.w,target.h);
+      const side=Math.round(iw*0.06);
+      const bottom=Math.round(ih*0.22);
+      const pw=iw-side*2, ph=ih-side-bottom, stripTop=side+ph;
+      ctx.fillStyle='#fffdf8';ctx.fillRect(ix,iy,iw,ih);
+      drawInto(ctx,ix+side,iy+side,pw,ph);
+      ctx.save();ctx.translate(ix,iy);
+      drawFns[styleId](ctx,iw,ih,{...d,stripTop});
+      if(d) drawMilestone(ctx,iw,ih,d.milestone,d.scale);
+      ctx.restore();
+      return;
     }
-    drawInto(ctx,px,py,pw,ph);
-    drawFns[styleId](ctx,target.w,target.h,{...d,stripTop});
+    drawInto(ctx,ix,iy,iw,ih);
+    ctx.save();ctx.translate(ix,iy);
+    drawFns[styleId](ctx,iw,ih,{...d,stripTop:0});
+    if(d) drawMilestone(ctx,iw,ih,d.milestone,d.scale);
+    ctx.restore();
     return;
   }
   const k=Math.min(1,MAX_EDGE/Math.max(w,h));
@@ -358,7 +413,7 @@ function drawOnly(d){
   cv.width=cw;cv.height=ch;
   if(styleId==='polaroid'&&d){ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,cw,ch);}
   ctx.drawImage(img,px,py,Math.round(w*k),Math.round(h*k));
-  if(d) drawFns[styleId](ctx,cw,ch,{...d,stripTop});
+  if(d){ drawFns[styleId](ctx,cw,ch,{...d,stripTop}); drawMilestone(ctx,cw,ch,d.milestone,d.scale); }
 }
 
 function setMode(m){
@@ -405,6 +460,14 @@ $('file1').addEventListener('change',e=>handleDuoFile(0,e.target.files[0]));
 $('file2').addEventListener('change',e=>handleDuoFile(1,e.target.files[0]));
 $('duoDate1').addEventListener('change',()=>{hideResult();redraw();});
 $('duoDate2').addEventListener('change',()=>{hideResult();redraw();});
+$('copySame').onclick=()=>{
+  if(!duoImgs[0]){alert('先选第一张照片');return;}
+  duoImgs[1]=duoImgs[0];
+  $('duoDate2').value=$('duoDate1').value;
+  $('pick2').classList.add('done');
+  $('cvWrap').style.display='block';$('styleCard').style.display='block';$('btns').style.display='flex';
+  hideResult();redrawDuo();
+};
 (function(){
   const gr=$('gapRange');
   gr.value=duoGap;
