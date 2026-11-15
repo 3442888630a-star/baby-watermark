@@ -114,7 +114,13 @@
   <button class="pick2" id="pickBatch"><span class="plus">＋</span>一次选多张照片<small>十几张也行，一张一张自动做好</small></button>
   <div class="card" id="batchCard" style="display:none">
     <div id="batchList"></div>
-    <div class="note" style="margin-top:10px">每张照片的日期都自动读好了，不对的可以改。下面的水印样式、颜色、打印尺寸等设置，对所有照片都一样；小名也会带上，一句话和身高体重是单张模式里逐张填的，批量时不带。</div>
+    <div class="row" style="margin-top:12px"><label>生成方式</label></div>
+    <div class="chips" id="batchKindChips">
+      <button class="chip on" data-kind="single">逐张加水印</button>
+      <button class="chip" data-kind="duo">拼版 · 两张拼一张</button>
+      <button class="chip" data-kind="big2">拼版 · 三张拼一张</button>
+    </div>
+    <div class="note" style="margin-top:10px">每张照片的日期都自动读好了，不对的可以改。下面的水印样式、颜色等设置，对所有照片都一样；小名也会带上，一句话和身高体重是单张模式里逐张填的，批量时不带。选拼版时，按你选照片的顺序两张（或三张）一组自动拼成6寸图，中间留白和四周留白用你上次拼版时的设置；最后一组不够数时，用那一组最后一张照片补齐空位。</div>
     <button id="batchGo" style="display:block;width:100%;margin-top:12px;padding:13px;border:none;border-radius:12px;background:#b3813c;color:#fff;font-size:16px;font-weight:600;cursor:pointer">全部生成并保存</button>
     <div class="note" id="batchStatus" style="margin-top:8px"></div>
   </div>
@@ -567,6 +573,8 @@ document.querySelectorAll('#modeChips .chip').forEach(c=>{c.onclick=()=>setMode(
 
 // ---------- 批量模式 ----------
 let batchItems=[];
+let batchKind='single';
+document.querySelectorAll('#batchKindChips .chip').forEach(c=>{c.onclick=()=>{batchKind=c.dataset.kind;document.querySelectorAll('#batchKindChips .chip').forEach(x=>x.classList.toggle('on',x.dataset.kind===batchKind));};});
 function renderBatchList(){
   const box=$('batchList');box.innerHTML='';
   const updAge=()=>{
@@ -612,6 +620,36 @@ $('batchGo').onclick=async ()=>{
   if(!$('birth').value){alert('先填宝宝出生日期');return;}
   const results=$('batchResults');results.innerHTML='';
   const status=$('batchStatus');
+  if(batchKind!=='single'){
+    const gs=batchKind==='duo'?2:3;
+    setLayout(batchKind);
+    const dateEls=[$('duoDate1'),$('duoDate2'),$('duoDate3')];
+    const groups=[];
+    for(let i=0;i<batchItems.length;i+=gs) groups.push(batchItems.slice(i,i+gs));
+    let made=0, filled=0;
+    for(let g=0;g<groups.length;g++){
+      const grp=groups[g];
+      if(grp.length<gs) filled++;
+      for(let i=0;i<gs;i++){
+        const src=grp[Math.min(i,grp.length-1)];
+        duoImgs[i]=src.im;
+        dateEls[i].value=src.dateStr;
+      }
+      const bad=grp.map(it=>ageDataFor(it.dateStr)).find(b=>b.err);
+      if(bad){status.textContent='第'+(g+1)+'组跳过了：'+bad.err;continue;}
+      exportMode=true;redrawDuo();exportMode=false;
+      const url=$('cv').toDataURL('image/jpeg',1.0);
+      const imEl=document.createElement('img');imEl.src=url;imEl.alt='第'+(g+1)+'组拼版成品';
+      results.appendChild(imEl);
+      try{const a=document.createElement('a');a.download='宝宝水印-6寸拼版-'+grp[0].dateStr+'-第'+(g+1)+'组.jpg';a.href=url;a.click();}catch(e){}
+      made++;
+      status.textContent='已拼好 '+made+' / '+groups.length+' 组';
+      await new Promise(r2=>setTimeout(r2,350));
+    }
+    status.textContent='全部完成：'+batchItems.length+' 张照片拼成了 '+made+' 张6寸图'+(filled?'（最后一组不够数，用最后一张补齐了空位）':'')+'。下载没自动弹出来的话，长按下面的图也能保存';
+    results.scrollIntoView({behavior:'smooth',block:'start'});
+    return;
+  }
   const t0=printTarget();
   const label=t0?t0.label:'原图';
   let done=0;
