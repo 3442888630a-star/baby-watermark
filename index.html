@@ -77,6 +77,15 @@
   <div class="row"><label>显示累计天数</label>
     <span class="switch"><input type="checkbox" id="showDays"><span class="track"></span></span>
   </div>
+  <div class="divider"></div>
+  <div class="row"><label>打印尺寸</label><span class="val" id="printVal">原图</span></div>
+  <div class="chips" id="printChips"></div>
+  <div class="note" id="printNote" style="margin-top:8px">不改尺寸，按原图分辨率生成。</div>
+  <div id="fitRow" style="display:none">
+    <div class="row"><label>填充方式</label></div>
+    <div class="chips" id="fitChips"></div>
+    <div class="note" style="margin-top:8px">裁剪填满：画面铺满整张相纸，边缘会裁掉一点；完整留白：照片一点不裁，多出的地方留白边。</div>
+  </div>
 </div>
 
 <div class="btns" id="btns">
@@ -89,7 +98,7 @@
   <img id="resultImg" alt="加好水印的照片">
 </div>
 
-<p class="tips">小提示：如果照片是微信转发来的，拍摄时间可能已被抹掉，那就手动改一下照片日期。生成的是原图分辨率，和原图一样清楚。</p>
+<p class="tips">小提示：如果照片是微信转发来的，拍摄时间可能已被抹掉，那就手动改一下照片日期。选了打印尺寸时，按 300 dpi 生成对应像素，拿去冲印店或家用照片打印机正好是那个尺寸；选原图则按原图分辨率生成。</p>
 
 <script>
 // ---------- 年龄计算 ----------
@@ -125,6 +134,35 @@ const drawFns={
 };
 const STYLES=[['classic','经典款'],['minimal','极简款'],['badge','印章款'],['film','胶片款'],['pill','天数贴'],['polaroid','拍立得']];
 const COLORS=[['#ffffff','奶白'],['#f7e7c3','奶油'],['#d9a441','暖金'],['#f2b8c6','浅粉'],['#9db38f','豆绿'],['#6b4a2f','深棕'],['#2b2620','墨黑']];
+// 打印尺寸：300 dpi，[id, 名称, 短边像素, 长边像素, 毫米标注]
+const PRINT_SIZES=[['orig','原图',0,0,''],['5','5寸',1050,1500,'89×127mm'],['6','6寸',1200,1800,'102×152mm'],['7','7寸',1500,2100,'127×178mm'],['8','8寸',1800,2400,'152×203mm'],['10','10寸',2400,3000,'203×254mm']];
+const FIT_MODES=[['crop','裁剪填满'],['fit','完整留白']];
+let printSize='orig', fitMode='crop';
+function printTarget(){
+  const spec=PRINT_SIZES.find(x=>x[0]===printSize);
+  if(!spec||printSize==='orig') return null;
+  const landscape=img&&img.naturalWidth>=img.naturalHeight;
+  const w=landscape?spec[3]:spec[2];
+  const h=landscape?spec[2]:spec[3];
+  return {id:spec[0],label:spec[1],w,h,mm:spec[4]};
+}
+function drawImageCover(ctx,dx,dy,dw,dh){
+  const iw=img.naturalWidth,ih=img.naturalHeight;
+  const srcRatio=iw/ih,dstRatio=dw/dh;
+  let sx=0,sy=0,sw=iw,sh=ih;
+  if(srcRatio>dstRatio){sw=Math.round(ih*dstRatio);sx=Math.round((iw-sw)/2);}
+  else if(srcRatio<dstRatio){sh=Math.round(iw/dstRatio);sy=Math.round((ih-sh)/2);}
+  ctx.drawImage(img,sx,sy,sw,sh,dx,dy,dw,dh);
+}
+function drawImageContain(ctx,dx,dy,dw,dh){
+  const iw=img.naturalWidth,ih=img.naturalHeight;
+  const k=Math.min(dw/iw,dh/ih);
+  const w=Math.round(iw*k),h=Math.round(ih*k);
+  ctx.drawImage(img,dx+Math.round((dw-w)/2),dy+Math.round((dh-h)/2),w,h);
+}
+function drawInto(ctx,dx,dy,dw,dh){
+  if(fitMode==='fit') drawImageContain(ctx,dx,dy,dw,dh); else drawImageCover(ctx,dx,dy,dw,dh);
+}
 
 // ---------- 页面逻辑 ----------
 const $=id=>document.getElementById(id);
@@ -136,13 +174,24 @@ COLORS.forEach(([v,n])=>{const b=document.createElement('button');b.className='s
 const customWrap=document.createElement('span');customWrap.className='custom';customWrap.innerHTML='自定义 <input type="color" id="customColor" value="#ffffff">';
 $('swatches').appendChild(customWrap);
 $('customColor').addEventListener('input',e=>{color=e.target.value;document.querySelectorAll('.sw').forEach(c=>c.classList.remove('on'));hideResult();redraw();});
+PRINT_SIZES.forEach(([id,name])=>{const b=document.createElement('button');b.className='chip'+(id===printSize?' on':'');b.textContent=name;b.dataset.pid=id;b.onclick=()=>{printSize=id;document.querySelectorAll('#printChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.pid===id));updatePrintUI();persist();hideResult();redraw();};$('printChips').appendChild(b);});
+FIT_MODES.forEach(([id,name])=>{const b=document.createElement('button');b.className='chip'+(id===fitMode?' on':'');b.textContent=name;b.dataset.fid=id;b.onclick=()=>{fitMode=id;document.querySelectorAll('#fitChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.fid===id));persist();hideResult();redraw();};$('fitChips').appendChild(b);});
+function updatePrintUI(){
+  const t=printTarget();
+  if(!t){$('printVal').textContent='原图';$('printNote').textContent='不改尺寸，按原图分辨率生成。';$('fitRow').style.display='none';return;}
+  $('printVal').textContent=t.label;
+  $('printNote').textContent=t.label+' · '+t.mm+' · 生成 '+t.w+'×'+t.h+' 像素（300 dpi），方向跟原照片一致（横的还是横的、竖的还是竖的）。';
+  $('fitRow').style.display='block';
+}
 
 const saved=JSON.parse(localStorage.getItem('wmSettings')||'{}');
 if(saved.scale){$('scale').value=saved.scale;$('scaleVal').textContent=saved.scale+'%';}
 if(saved.showDays===true)$('showDays').checked=true;
+if(saved.printSize&&PRINT_SIZES.some(x=>x[0]===saved.printSize)){printSize=saved.printSize;document.querySelectorAll('#printChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.pid===printSize));}
+if(saved.fitMode&&(saved.fitMode==='crop'||saved.fitMode==='fit')){fitMode=saved.fitMode;document.querySelectorAll('#fitChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.fid===fitMode));}
 const savedBirth=localStorage.getItem('babyBirth');
 if(savedBirth) $('birth').value=savedBirth;
-function persist(){localStorage.setItem('wmSettings',JSON.stringify({scale:+$('scale').value,showDays:$('showDays').checked}));}
+function persist(){localStorage.setItem('wmSettings',JSON.stringify({scale:+$('scale').value,showDays:$('showDays').checked,printSize:printSize,fitMode:fitMode}));}
 $('birth').addEventListener('change',()=>{localStorage.setItem('babyBirth',$('birth').value);hideResult();redraw();});
 $('photoDate').addEventListener('change',()=>{$('dateNote').textContent='手动设置的照片日期';hideResult();redraw();});
 $('scale').addEventListener('input',()=>{$('scaleVal').textContent=$('scale').value+'%';persist();hideResult();redraw();});
@@ -153,7 +202,7 @@ $('file').addEventListener('change',async e=>{
   const f=e.target.files[0]; if(!f) return;
   try{const buf=await f.arrayBuffer();const d=parseExifDate(buf);if(d){$('photoDate').value=toDateStr(d);$('dateNote').textContent='已自动读取照片的拍摄时间';}else{$('photoDate').value=toDateStr(new Date());$('dateNote').textContent='没读到拍摄时间，先用今天，可手动改';}}catch(err){$('photoDate').value=toDateStr(new Date());}
   const url=URL.createObjectURL(f); const im=new Image();
-  im.onload=()=>{img=im;$('pick').style.display='none';$('cvWrap').style.display='block';$('styleCard').style.display='block';$('btns').style.display='flex';hideResult();redraw();};
+  im.onload=()=>{img=im;updatePrintUI();$('pick').style.display='none';$('cvWrap').style.display='block';$('styleCard').style.display='block';$('btns').style.display='flex';hideResult();redraw();};
   im.src=url;
 });
 
@@ -178,6 +227,22 @@ function redraw(){
 function drawOnly(d){
   const cv=$('cv'),ctx=cv.getContext('2d');
   const w=img.naturalWidth,h=img.naturalHeight;
+  const target=d?printTarget():null;
+  if(target){
+    // 打印尺寸模式：成品画布严格等于目标像素
+    let px=0,py=0,pw=target.w,ph=target.h,stripTop=0;
+    cv.width=target.w;cv.height=target.h;
+    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,target.w,target.h);
+    if(styleId==='polaroid'){
+      const side=Math.round(target.w*0.06);
+      const bottom=Math.round(target.h*0.22);
+      px=side;py=side;pw=target.w-side*2;ph=target.h-side-bottom;stripTop=py+ph;
+      ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,target.w,target.h);
+    }
+    drawInto(ctx,px,py,pw,ph);
+    drawFns[styleId](ctx,target.w,target.h,{...d,stripTop});
+    return;
+  }
   const k=Math.min(1,MAX_EDGE/Math.max(w,h));
   let cw=Math.round(w*k),ch=Math.round(h*k),px=0,py=0,stripTop=0;
   if(styleId==='polaroid'&&d){const side=Math.round(cw*0.06);const bottom=Math.round(cw*0.26);px=side;py=side;stripTop=side+ch;cw+=side*2;ch+=side+bottom;}
@@ -198,7 +263,7 @@ $('save').onclick=()=>{
   // 手机上最稳的保存方式：把成品图显示出来长按保存；同时尝试直接下载（电脑浏览器有效）
   $('resultImg').src=url;
   $('resultBox').style.display='block';
-  try{const a=document.createElement('a');a.download='宝宝水印-'+($('photoDate').value||'photo')+'.jpg';a.href=url;a.click();}catch(e){}
+  try{const a=document.createElement('a');const t=printTarget();a.download='宝宝水印-'+(t?t.label+'-':'')+($('photoDate').value||'photo')+'.jpg';a.href=url;a.click();}catch(e){}
   setTimeout(()=>$('resultBox').scrollIntoView({behavior:'smooth',block:'center'}),80);
 };
 </script>
