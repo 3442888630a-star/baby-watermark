@@ -78,6 +78,7 @@
 <input type="file" id="file" accept="image/*" hidden>
 <button id="pick"><span class="plus">＋</span>选择宝宝照片<small>从相册选一张</small></button>
 <div id="cvWrap"><canvas id="cv"></canvas></div>
+<div id="previewNote" class="note" style="display:none;text-align:center;margin-top:6px"></div>
 
 <div id="duoBox" style="display:none">
   <input type="file" id="file1" accept="image/*" hidden>
@@ -472,6 +473,7 @@ function settings(){return {scale:+$('scale').value/100, color:color, showDays:$
 
 function redraw(){
   if(mode==='duo'){ if(duoImgs[0]||duoImgs[1]||duoImgs[2]) redrawDuo(); return; }
+  if(mode==='batch'&&!batchBusy){ updateBatchPreview(); return; }
   if(!img) return;
   const r=currentAge();
   $('ageLine').style.display=mode==='batch'?'none':'block';
@@ -522,6 +524,7 @@ function setMode(m){
   mode=m;
   document.querySelectorAll('#modeChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.mode===m));
   hideResult();
+  $('previewNote').style.display='none';
   if(m==='duo'){
     $('modeNote').textContent='两张照片左右并排拼成一张横的6寸图：打印时选6寸、横向，印出来沿正中间竖着裁开，就是两张4寸。每张照片的水印按它自己的拍摄日期算。';
     $('pick').style.display='none';
@@ -551,9 +554,9 @@ function setMode(m){
     $('customRow').style.display='none';
     $('printChips').style.display='flex';
     updatePrintUI();
-    $('cvWrap').style.display='none';
     $('btns').style.display='none';
-    if(batchItems.length){$('styleCard').style.display='block';}
+    if(batchItems.length){$('styleCard').style.display='block';updateBatchPreview();}
+    else{$('cvWrap').style.display='none';}
   }else{
     $('modeNote').textContent='一张一张做，尺寸在下面选。';
     $('duoBox').style.display='none';
@@ -574,7 +577,31 @@ document.querySelectorAll('#modeChips .chip').forEach(c=>{c.onclick=()=>setMode(
 // ---------- 批量模式 ----------
 let batchItems=[];
 let batchKind='single';
-document.querySelectorAll('#batchKindChips .chip').forEach(c=>{c.onclick=()=>{batchKind=c.dataset.kind;document.querySelectorAll('#batchKindChips .chip').forEach(x=>x.classList.toggle('on',x.dataset.kind===batchKind));};});
+let batchBusy=false, batchPreviewIdx=0;
+document.querySelectorAll('#batchKindChips .chip').forEach(c=>{c.onclick=()=>{batchKind=c.dataset.kind;document.querySelectorAll('#batchKindChips .chip').forEach(x=>x.classList.toggle('on',x.dataset.kind===batchKind));updateBatchPreview();};});
+function updateBatchPreview(){
+  if(mode!=='batch'||!batchItems.length) return;
+  batchBusy=true;
+  try{
+    $('cvWrap').style.display='block';
+    $('styleCard').style.display='block';
+    const note=$('previewNote');note.style.display='block';
+    if(batchKind==='single'){
+      const idx=Math.min(batchPreviewIdx,batchItems.length-1);
+      const it=batchItems[idx];
+      img=it.im;$('photoDate').value=it.dateStr;
+      redraw();
+      note.textContent='预览：第 '+(idx+1)+' 张的效果（点下面列表里任意一行，可以换一张看）';
+    }else{
+      const gs=batchKind==='duo'?2:3;
+      setLayout(batchKind);
+      const dateEls=[$('duoDate1'),$('duoDate2'),$('duoDate3')];
+      for(let i=0;i<gs;i++){const src=batchItems[Math.min(i,batchItems.length-1)];duoImgs[i]=src.im;dateEls[i].value=src.dateStr;}
+      exportMode=false;redrawDuo();
+      note.textContent='预览：第一组拼版的效果（共 '+batchItems.length+' 张，将拼成 '+Math.ceil(batchItems.length/gs)+' 张）';
+    }
+  }finally{batchBusy=false;}
+}
 function renderBatchList(){
   const box=$('batchList');box.innerHTML='';
   const updAge=()=>{
@@ -588,7 +615,10 @@ function renderBatchList(){
     });
   };
   batchItems.forEach((it,i)=>{
-    const row=document.createElement('div');row.className='brow';
+    const row=document.createElement('div');row.className='brow';row.style.cursor='pointer';
+    row.addEventListener('click',e=>{if(e.target.tagName==='INPUT')return;batchPreviewIdx=i;updateBatchPreview();});
+    const th=document.createElement('img');th.src=it.url||'';th.alt='';th.style.cssText='width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none';
+    row.appendChild(th);
     const label=document.createElement('span');label.textContent='第'+(i+1)+'张';
     const din=document.createElement('input');din.type='date';din.value=it.dateStr;
     din.addEventListener('change',()=>{it.dateStr=din.value;updAge();});
@@ -611,15 +641,17 @@ $('fileBatch').addEventListener('change',async e=>{
     try{const buf=await f.arrayBuffer();const d=parseExifDate(buf);if(d)ds=toDateStr(d);}catch(err){}
     const url=URL.createObjectURL(f);
     const im=await new Promise(res=>{const i2=new Image();i2.onload=()=>res(i2);i2.onerror=()=>res(null);i2.src=url;});
-    if(im) batchItems.push({im,dateStr:ds});
+    if(im) batchItems.push({im,dateStr:ds,url});
   }
-  if(batchItems.length){$('styleCard').style.display='block';renderBatchList();}
+  if(batchItems.length){$('styleCard').style.display='block';renderBatchList();updateBatchPreview();}
 });
 $('batchGo').onclick=async ()=>{
   if(!batchItems.length){alert('先选照片');return;}
   if(!$('birth').value){alert('先填宝宝出生日期');return;}
   const results=$('batchResults');results.innerHTML='';
+  const hd=document.createElement('div');hd.className='note';hd.style.cssText='margin-top:14px;font-weight:600;color:#8a6d3b';hd.textContent='成品图（长按图片可以保存到相册）';results.appendChild(hd);
   const status=$('batchStatus');
+  batchBusy=true;
   if(batchKind!=='single'){
     const gs=batchKind==='duo'?2:3;
     setLayout(batchKind);
@@ -647,6 +679,7 @@ $('batchGo').onclick=async ()=>{
       await new Promise(r2=>setTimeout(r2,350));
     }
     status.textContent='全部完成：'+batchItems.length+' 张照片拼成了 '+made+' 张6寸图'+(filled?'（最后一组不够数，用最后一张补齐了空位）':'')+'。下载没自动弹出来的话，长按下面的图也能保存';
+    batchBusy=false;updateBatchPreview();
     results.scrollIntoView({behavior:'smooth',block:'start'});
     return;
   }
@@ -669,6 +702,7 @@ $('batchGo').onclick=async ()=>{
     await new Promise(r2=>setTimeout(r2,350));
   }
   status.textContent='全部完成：共 '+done+' 张。下载没自动弹出来的话，长按下面的成品图也能保存';
+  batchBusy=false;updateBatchPreview();
   results.scrollIntoView({behavior:'smooth',block:'start'});
 };
 async function handleDuoFile(idx,f){
