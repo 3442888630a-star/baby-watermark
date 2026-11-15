@@ -82,6 +82,9 @@
     <div class="row"><label>第二张照片日期</label><input type="date" id="duoDate2"></div>
     <div class="note">两张照片各按自己的拍摄日期算年龄，日期会自动读，读不到或不对可以手动改。</div>
     <div id="duoAgeLine" style="display:none;margin-top:10px;background:#faf3e6;border-radius:10px;padding:10px 12px;font-size:14px;color:#6b6257"></div>
+    <div class="row" style="margin-top:14px"><label>中间留白</label><span class="val" id="gapVal">约 5 mm</span></div>
+    <input type="range" id="gapRange" min="0" max="180" step="10" value="60">
+    <div class="note">两张照片中间空一条白边，整张图还是6寸大小不变。印出来沿白边正中间裁开，每张仍是4寸宽，只是照片内侧会带一点点白边，留白拉得越大白边越宽。</div>
   </div>
 </div>
 
@@ -211,6 +214,8 @@ let mode='single';
 let duoImgs=[null,null];
 let exportMode=false;
 const DUO_W=1800, DUO_H=1200, CELL_W=900, CELL_H=1200;
+let duoGap=60;
+try{const g=parseInt(localStorage.getItem('babyGap'));if(!isNaN(g)&&g>=0&&g<=180)duoGap=g;}catch(e){}
 function ageDataFor(pdStr){
   const birthStr=$('birth').value;
   if(!birthStr) return {err:'先填宝宝出生日期'};
@@ -233,23 +238,25 @@ function renderCell(ctx,im,d,W,H){
 function redrawDuo(){
   const cv=$('cv'),ctx=cv.getContext('2d');
   cv.width=DUO_W;cv.height=DUO_H;
-  ctx.fillStyle='#f3ecdf';ctx.fillRect(0,0,DUO_W,DUO_H);
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,DUO_W,DUO_H);
+  const cellW=(DUO_W-duoGap)/2;
   const datas=[ageDataFor($('duoDate1').value),ageDataFor($('duoDate2').value)];
   const lines=[];
   for(let i=0;i<2;i++){
     const im=duoImgs[i];
+    const x0=i===0?0:cellW+duoGap;
     ctx.save();
-    ctx.beginPath();ctx.rect(i*CELL_W,0,CELL_W,CELL_H);ctx.clip();
-    ctx.translate(i*CELL_W,0);
+    ctx.beginPath();ctx.rect(x0,0,cellW,CELL_H);ctx.clip();
+    ctx.translate(x0,0);
     if(im){
       const d=datas[i].err?null:{mainText:datas[i].mainText,dateText:datas[i].dateText,totalDays:datas[i].age.totalDays,...settings()};
-      renderCell(ctx,im,d,CELL_W,CELL_H);
+      renderCell(ctx,im,d,cellW,CELL_H);
       lines.push('第'+(i+1)+'张：'+(datas[i].err?datas[i].err:datas[i].mainText));
     }else{
-      ctx.fillStyle='#f8f3e8';ctx.fillRect(0,0,CELL_W,CELL_H);
+      ctx.fillStyle='#f8f3e8';ctx.fillRect(0,0,cellW,CELL_H);
       ctx.fillStyle='#a29885';ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.font='44px sans-serif';
-      ctx.fillText(i===0?'第一张照片':'第二张照片',CELL_W/2,CELL_H/2);
+      ctx.fillText(i===0?'第一张照片':'第二张照片',cellW/2,CELL_H/2);
       lines.push('第'+(i+1)+'张：还没选');
     }
     ctx.restore();
@@ -257,7 +264,8 @@ function redrawDuo(){
   if(!exportMode){
     ctx.save();
     ctx.strokeStyle='rgba(60,50,35,0.45)';ctx.lineWidth=3;ctx.setLineDash([20,14]);
-    ctx.beginPath();ctx.moveTo(CELL_W,0);ctx.lineTo(CELL_W,DUO_H);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cellW,0);ctx.lineTo(cellW,DUO_H);ctx.stroke();
+    if(duoGap>0){ctx.beginPath();ctx.moveTo(cellW+duoGap,0);ctx.lineTo(cellW+duoGap,DUO_H);ctx.stroke();}
     ctx.restore();
   }
   $('duoAgeLine').style.display='block';
@@ -366,7 +374,7 @@ function setMode(m){
     $('ageLine').style.display='none';
     $('printChips').style.display='none';
     $('printVal').textContent='6寸拼版';
-    $('printNote').textContent='固定生成 1800×1200 像素（6寸横版，300 dpi），左右各是一张 4寸（900×1200）。';
+    $('printNote').textContent='固定生成 1800×1200 像素（6寸横版，300 dpi）；中间留白在上面选照片的地方拉条调。';
     $('fitRow').style.display='block';
     $('again').style.display='none';
     if(duoImgs[0]||duoImgs[1]){$('cvWrap').style.display='block';$('styleCard').style.display='block';$('btns').style.display='flex';redrawDuo();}
@@ -397,6 +405,13 @@ $('file1').addEventListener('change',e=>handleDuoFile(0,e.target.files[0]));
 $('file2').addEventListener('change',e=>handleDuoFile(1,e.target.files[0]));
 $('duoDate1').addEventListener('change',()=>{hideResult();redraw();});
 $('duoDate2').addEventListener('change',()=>{hideResult();redraw();});
+(function(){
+  const gr=$('gapRange');
+  gr.value=duoGap;
+  const sync=()=>{$('gapVal').textContent=duoGap===0?'不留白':'约 '+(duoGap*25.4/300).toFixed(1).replace(/\.0$/,'')+' mm';};
+  sync();
+  gr.addEventListener('input',()=>{duoGap=+gr.value;try{localStorage.setItem('babyGap',String(duoGap));}catch(e){}sync();hideResult();redraw();});
+})();
 
 function hideResult(){$('resultBox').style.display='none';}
 
